@@ -155,7 +155,13 @@ class BlockScanner {
     if (reFence.test(t)) return true;
     if (reBlockquote.test(t)) return true;
     if (reHtmlBlockStart.test(t)) return true;
-    if (reListItem.test(t)) return true;
+    const m = reListItem.exec(t);
+    if (m) {
+      const isOrdered = m[2] !== '*' && m[2] !== '+' && m[2] !== '-';
+      const hasContent = m[5] !== undefined && m[5].trim() !== '';
+      if (isOrdered) return m[3] === '1' && hasContent;
+      return hasContent;
+    }
     return false;
   }
 
@@ -171,9 +177,10 @@ class BlockScanner {
 
   scan(i, end, out) {
     let pendingBlanks = 0;
+    let lastWasParagraph = false;
     while (i < end) {
       const text = this.line(i);
-      if (reBlankLine.test(text)) { i++; pendingBlanks++; continue; }
+      if (reBlankLine.test(text)) { i++; pendingBlanks++; lastWasParagraph = false; continue; }
       if (pendingBlanks) {
         if (out.length) out.push({ type: 'space', raw: '\n'.repeat(pendingBlanks) });
         pendingBlanks = 0;
@@ -201,6 +208,7 @@ class BlockScanner {
         while (buf.length && buf[buf.length - 1] === '') buf.pop();
         out.push({ type: 'code', text: buf.length ? buf.join('\n') + '\n' : '', lang: null });
         i = lastNonBlank;
+        lastWasParagraph = false;
         continue;
       }
 
@@ -228,6 +236,7 @@ class BlockScanner {
         const lang = info ? info.split(/[ \t]/)[0].replace(reAnyPunct, '$1') : null;
         out.push({ type: 'code', text: buf.length ? buf.join('\n') + '\n' : '', lang: lang || null });
         i = j;
+        lastWasParagraph = false;
         continue;
       }
 
@@ -243,33 +252,48 @@ class BlockScanner {
         }
         out.push({ type: 'heading', depth: m[1].length, text: body });
         i++;
+        lastWasParagraph = false;
         continue;
       }
 
       // thematic break
-      if (reHr.test(text)) { out.push({ type: 'hr' }); i++; continue; }
+      if (reHr.test(text)) { out.push({ type: 'hr' }); i++; lastWasParagraph = false; continue; }
 
       // blockquote
       if (reBlockquote.test(text)) {
         const res = this.scanBlockquote(i, end);
         out.push(res.token);
         i = res.next;
+        lastWasParagraph = false;
         continue;
       }
 
       // list
       m = reListItem.exec(text);
       if (m) {
-        const res = this.scanList(i, end, m);
-        out.push(res.token);
-        i = res.next;
-        continue;
+        let canStart = true;
+        if (lastWasParagraph) {
+          const isOrdered = m[2] !== '*' && m[2] !== '+' && m[2] !== '-';
+          const hasContent = m[5] !== undefined && m[5].trim() !== '';
+          if (isOrdered) {
+            if (m[3] !== '1' || !hasContent) canStart = false;
+          } else {
+            if (!hasContent) canStart = false;
+          }
+        }
+        if (canStart) {
+          const res = this.scanList(i, end, m);
+          out.push(res.token);
+          i = res.next;
+          lastWasParagraph = false;
+          continue;
+        }
       }
 
       // HTML block
       if (reHtmlBlockStart.test(text) || reHtmlAnyTagLine.test(text)) {
         const res = this.scanHtml(i, end);
-        if (res) { out.push(res.token); i = res.next; continue; }
+        if (res) { out.push(res.token); i = res.next; lastWasParagraph = false; continue; }
       }
 
       // link reference definition
@@ -278,6 +302,7 @@ class BlockScanner {
         if (def) {
           if (!this.links[def.tag]) this.links[def.tag] = { href: def.href, title: def.title };
           i = def.next;
+          lastWasParagraph = false;
           continue;
         }
       }
@@ -285,7 +310,7 @@ class BlockScanner {
       // table (GFM)
       if (i + 1 < end) {
         const table = this.scanTable(i, end);
-        if (table) { out.push(table.token); i = table.next; continue; }
+        if (table) { out.push(table.token); i = table.next; lastWasParagraph = false; continue; }
       }
 
       // paragraph, possibly promoted to a setext heading
@@ -306,9 +331,11 @@ class BlockScanner {
         if (depth) {
           out.push({ type: 'heading', depth, text: body.trim() });
           i = j + 1;
+          lastWasParagraph = false;
         } else {
           out.push({ type: 'paragraph', text: body });
           i = j;
+          lastWasParagraph = true;
         }
         continue;
       }
