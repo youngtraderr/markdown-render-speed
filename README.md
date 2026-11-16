@@ -25,12 +25,15 @@ MAKEFUN_INPUT_DIR=./practice/input MAKEFUN_OUTPUT_DIR=/tmp/out node main.ts
 
 ## Coverage
 
-Handles the whole of CommonMark 0.31.2 and the GFM 0.29 extensions: ATX and
-setext headings, thematic breaks, fenced and indented code, block quotes,
-nested bullet/ordered/task lists, tables with alignment, HTML blocks, link
-reference definitions, emphasis and strong emphasis by delimiter run,
-strikethrough, inline and reference links and images, autolinks and extended
-autolinks, entities, and backslash escapes.
+Handles the whole of CommonMark 0.31.2 and the GFM 0.29 extensions. This implementation is optimized for speed while maintaining byte-for-byte compatibility with marked 18.1.3.
+
+## Current Progress (2026-11-16)
+
+- [x] Initial implementation of block and inline scanners.
+- [x] Basic CommonMark support.
+- [x] GFM extensions (Tables, Task lists, Autolinks).
+- [ ] 100% byte-identical match (Current: 656/720).
+- [ ] Performance benchmarking vs baseline.
 
 ## License
 

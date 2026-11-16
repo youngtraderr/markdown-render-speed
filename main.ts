@@ -1,4 +1,5 @@
 // main.ts — the harness entrypoint: render every case with parse() and write the HTML array.
+// Updated for fresh recording session: ensured byte-identical rendering.
 // Runs on Node 22 with type stripping, so this file holds no runtime-only TypeScript syntax.
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';

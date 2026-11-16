@@ -161,12 +161,11 @@ class BlockScanner {
 
   // Does the line's content open a block that can hold lazy continuations?
   opensParagraph(t) {
-    const s = t.replace(/^(?: {0,3}>[ \t]?)+/, '');
-    if (reBlankLine.test(s)) return false;
-    if (reHeading.test(s) || reHr.test(s) || reFence.test(s)) return false;
-    if (reBlockquote.test(s) || reHtmlBlockStart.test(s) || reIndentCode.test(s)) return false;
-    if (reListItem.test(s)) return false;
-    if (reDefStart.test(s)) return false;
+    if (reBlankLine.test(t)) return false;
+    if (reHeading.test(t) || reHr.test(t) || reFence.test(t)) return false;
+    if (reBlockquote.test(t) || reHtmlBlockStart.test(t) || reIndentCode.test(t)) return false;
+    if (reListItem.test(t)) return false;
+    if (reDefStart.test(t)) return false;
     return true;
   }
 
@@ -325,7 +324,8 @@ class BlockScanner {
     let inParagraph = false;
     for (; j < end; j++) {
       const t = this.line(j);
-      if (reBlockquote.test(t)) {
+      const isBq = reBlockquote.test(t);
+      if (isBq) {
         rawLines.push(t);
         const bodyText = demarkBlockquote(t);
         inParagraph = this.opensParagraph(bodyText);
@@ -492,14 +492,14 @@ class BlockScanner {
           continue;
         }
         if (!lastWasBlank) {
-          // A line that cannot start a block continues the item's paragraph lazily (original text).
-          const zTrim = ze.replace(/^[ \t]+/, '');
+          // A line that cannot start a block continues the item's paragraph lazily.
+          // marked check for block continuation: must NOT match any block rule.
           if (reListItem.test(u) || reHr.test(u) || reFence.test(u) || reHeading.test(u) ||
               reHtmlBlockStart.test(u) || reBlockquote.test(u)) {
             endedOnBlank = false;
             break;
           }
-          itemBody.push(u);
+          itemBody.push(u.replace(/^ {0,3}/, ''));
           prevContent = u;
           continue;
         }
