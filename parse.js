@@ -171,9 +171,14 @@ class BlockScanner {
   }
 
   scan(i, end, out) {
+    let pendingBlanks = 0;
     while (i < end) {
       const text = this.line(i);
-      if (reBlankLine.test(text)) { i++; continue; }
+      if (reBlankLine.test(text)) { i++; pendingBlanks++; continue; }
+      if (pendingBlanks) {
+        if (out.length) out.push({ type: 'space', raw: '\n'.repeat(pendingBlanks) });
+        pendingBlanks = 0;
+      }
 
       // indented code
       if (reIndentCode.test(text)) {
@@ -214,7 +219,12 @@ class BlockScanner {
           const t = this.line(j);
           const cm = reFenceClose.exec(t);
           if (cm && cm[1][0] === fenceChar && cm[1].length >= fenceLen) { j++; break; }
-          buf.push(indent && t.startsWith(fenceIndentStr) ? t.slice(indent) : t);
+          // Remove up to as many leading spaces as the opening fence had (marked's indentCodeCompensation).
+          if (indent) {
+            let lead = 0;
+            while (lead < t.length && lead < indent && t[lead] === ' ') lead++;
+            buf.push(t.slice(lead));
+          } else buf.push(t);
         }
         const lang = info ? info.split(/[ \t]/)[0].replace(reAnyPunct, '$1') : null;
         out.push({ type: 'code', text: buf.length ? buf.join('\n') + '\n' : '', lang: lang || null });
@@ -242,24 +252,9 @@ class BlockScanner {
 
       // blockquote
       if (reBlockquote.test(text)) {
-        const buf = [];
-        let j = i;
-        let lazy = false;
-        for (; j < end; j++) {
-          const t = this.line(j);
-          if (reBlockquote.test(t)) {
-            const mm = /^( {0,3})>[ \t]?/.exec(t);
-            buf.push(t.slice(mm[0].length));
-            lazy = this.opensParagraph(t.slice(mm[0].length));
-          } else if (lazy && !reBlankLine.test(t) && !this.interrupts(j)) {
-            buf.push(t);
-          } else break;
-        }
-        const sub = new BlockScanner(buf.join('\n'), this.links);
-        const tokens = [];
-        sub.scan(0, sub.lines.length, tokens);
-        out.push({ type: 'blockquote', tokens });
-        i = j;
+        const res = this.scanBlockquote(i, end);
+        out.push(res.token);
+        i = res.next;
         continue;
       }
 
@@ -322,28 +317,61 @@ class BlockScanner {
     return out;
   }
 
+  scanBlockquote(i, end) {
+    // Phase 1: collect the raw marker lines the way marked's blockquote tokenizer does — a
+    // `>`-marked line always continues, and a lazy line continues while the quote is mid-paragraph.
+    const rawLines = [];
+    let j = i;
+    let inParagraph = false;
+    for (; j < end; j++) {
+      const t = this.line(j);
+      if (reBlockquote.test(t)) {
+        rawLines.push(t);
+        const bodyText = demarkBlockquote(t);
+        inParagraph = this.opensParagraph(bodyText);
+      } else if (inParagraph && !reBlankLine.test(t) && !this.interrupts(j)) {
+        rawLines.push(t);
+      } else break;
+    }
+    // Phase 2: strip markers, expanding tabs by the marker column and rewriting setext underlines.
+    const body = rawLines.map((t) => {
+      if (!reBlockquote.test(t)) return t;
+      return demarkBlockquote(t);
+    });
+    for (let b = 1; b < body.length; b++) {
+      if (reSetext.test(body[b])) body[b] = '    ' + body[b].replace(/^ {0,3}/, '');
+    }
+    const sub = new BlockScanner(body.join('\n'), this.links);
+    const tokens = [];
+    sub.scan(0, sub.lines.length, tokens);
+    return { token: { type: 'blockquote', tokens }, next: j };
+  }
+
   scanDef(i, end) {
+    // marked's def rule, verbatim: label, then href (angle or bare), then an optional title that
+    // must be quoted and may contain newlines, and it must be followed by a blank line or EOF.
     const parts = [this.line(i)];
     let used = 1;
     while (used < 4 && i + used < end) {
-      const next = this.line(i + used);
-      if (reBlankLine.test(next)) break;
-      parts.push(next);
+      parts.push(this.line(i + used));
       used++;
     }
-    const re = /^ {0,3}\[((?:[^\\\[\]]|\\[\s\S])+)\]:[ \t]*(?:\n[ \t]*)?(?:<([^<>\n]*)>|(\S+))?(?:[ \t]*(?:\n[ \t]*)?(?:"((?:[^"\\]|\\[\s\S])*)"|'((?:[^'\\]|\\[\s\S])*)'|\(((?:[^()\\]|\\[\s\S])*)\)))?[ \t]*$/;
+    const re = /^ {0,3}\[((?!\s*\])(?:\\[\s\S]|[^\[\]\\\n]|\n(?![ \t]*\n))+)\]: *(?:\n[ \t]*)?([^<\s][^\s]*|<.*?>)(?:(?: +(?!\n[ \t]*\n)(?:\n[ \t]*)?| *\n[ \t]*)((?:"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\\n]|\n(?!\n))*'|\((?:\\[\s\S]|[^()\\])*\))))? *(?:\n+|$)/;
     for (let n = used; n >= 1; n--) {
-      const chunk = parts.slice(0, n).join('\n');
+      const chunk = parts.slice(0, n).join('\n') + '\n';
       const m = re.exec(chunk);
       if (!m) continue;
       const tag = normalizeLabel(m[1]);
       if (!tag) continue;
-      const hy = m[2] !== undefined ? m[2] : m[3] === undefined ? '' : unescapePunct(m[3]);
+      // How many source lines the match actually covered: one per newline it consumed.
+      let consumed = 0;
+      for (let c = 0; c < m[0].length; c++) if (m[0][c] === '\n') consumed++;
+      if (consumed < 1) consumed = 1;
+      let href = m[2];
+      if (href[0] === '<') href = href.slice(1, -1);
       let title = null;
-      if (m[4] !== undefined) title = unescapePunct(m[4]);
-      else if (m[5] !== undefined) title = unescapePunct(m[5]);
-      else if (m[6] !== undefined) title = unescapePunct(m[6]);
-      return { tag, href: unescapePunct(hy), title, next: i + n };
+      if (m[3] !== undefined) title = unescapePunct(m[3].slice(1, -1));
+      return { tag, href: unescapePunct(href), title, next: i + consumed };
     }
     return null;
   }
@@ -431,38 +459,51 @@ class BlockScanner {
       const markerLen = m[2].length;
       const indent = m[1].length;
       const after = m[5];
-      const lead = after.length - after.replace(/^[ \t]+/, '').length;
-      let pad = lead;
-      if (pad > 4) pad = 1;
-      if (pad === 0) pad = 1;
+      // marked expands tabs in the marker's remainder relative to the marker column, then measures
+      // the run of leading whitespace; >4 columns collapse to a 1-column pad.
+      const expanded = expandTabsFrom(after, indent + markerLen);
+      const lead = expanded.length - expanded.replace(/^[ \t]+/, '').length;
+      let pad = lead > 4 ? 1 : lead;
       const contentCol = indent + markerLen + pad;
-      const firstLine = after.slice(pad);
+      const firstLine = expanded.slice(Math.min(expanded.length, pad));
 
       const itemBody = [firstLine];
       let k = j + 1;
       let lastWasBlank = false;
       let innerBlank = false;
       let endedOnBlank = false;
+      let prevContent = firstLine;
 
       for (; k < end; k++) {
         const u = this.line(k);
-        if (reBlankLine.test(u)) {
+        const ze = expandTabsFrom(u, 0);
+        const leadZ = ze.length - ze.replace(/^[ \t]+/, '').length;
+        if (ze.length === 0) {
           itemBody.push('');
           lastWasBlank = true;
+          prevContent = '';
           continue;
         }
-        const w = indentWidth(u, 0);
-        if (w >= contentCol) {
+        if (leadZ >= contentCol || ze.trim() === '') {
           if (lastWasBlank) innerBlank = true;
-          itemBody.push(stripIndent(u, contentCol));
+          itemBody.push(ze.slice(contentCol));
           lastWasBlank = false;
+          prevContent = ze.slice(contentCol);
           continue;
         }
-        if (!lastWasBlank && !this.interrupts(k)) {
+        if (!lastWasBlank) {
+          // A line that cannot start a block continues the item's paragraph lazily (original text).
+          const zTrim = ze.replace(/^[ \t]+/, '');
+          if (reListItem.test(u) || reHr.test(u) || reFence.test(u) || reHeading.test(u) ||
+              reHtmlBlockStart.test(u) || reBlockquote.test(u)) {
+            endedOnBlank = false;
+            break;
+          }
           itemBody.push(u);
+          prevContent = u;
           continue;
         }
-        if (lastWasBlank) endedOnBlank = true;
+        endedOnBlank = true;
         break;
       }
 
@@ -514,10 +555,24 @@ class BlockScanner {
   }
 }
 
+// Strip a blockquote marker and one column of following whitespace, expanding tabs by the
+// marker's own width (marked's blockquoteMarkerWhitespace + J).
+function demarkBlockquote(t) {
+  const m = /^( {0,3}>)([ \t]+|)/.exec(t);
+  if (!m) return t;
+  const markerCol = m[1].length;
+  const rest = t.slice(m[0].length);
+  if (!m[2]) return rest;
+  // Expand the whitespace run against the marker column, then drop exactly one column.
+  const wsExpanded = expandTabsFrom(m[2], markerCol);
+  const drop = 1;
+  const remaining = wsExpanded.slice(drop);
+  return remaining + rest;
+}
+
 /* ---------------------------------------------------------------- width helpers */
 
-function indentWidth(str, base) {
-  let col = 0;
+function indentWidth(str, base) {  let col = 0;
   for (let i = 0; i < str.length; i++) {
     const ch = str[i];
     if (ch === ' ') col++;
@@ -525,6 +580,22 @@ function indentWidth(str, base) {
     else break;
   }
   return col;
+}
+
+// Expand tabs to spaces starting from column `base` (marked's J helper).
+function expandTabsFrom(str, base) {
+  if (str.indexOf('\t') < 0) return str;
+  let col = base;
+  let out = '';
+  for (let i = 0; i < str.length; i++) {
+    const ch = str[i];
+    if (ch === '\t') {
+      const w = 4 - (col % 4);
+      out += ' '.repeat(w);
+      col += w;
+    } else { out += ch; col++; }
+  }
+  return out;
 }
 
 // Remove up to `cols` columns of leading whitespace; a tab that overruns leaves padding spaces.
@@ -619,7 +690,7 @@ class InlineScanner {
       }
 
       if (ch === '`') {
-        const m = /^(`+)([\s\S]*?[^`])\1(?!`)/.exec(rest);
+        const m = /^(`+)([^`]|[^`][\s\S]*?[^`])\1(?!`)/.exec(rest);
         if (m) {
           flush();
           let body = m[2].replace(/\n/g, ' ');
@@ -691,7 +762,7 @@ class InlineScanner {
           canClose = rightFlank;
         }
         flush();
-        nodes.push({ type: 'delim', ch, count: len, canOpen, canClose });
+        nodes.push({ type: 'delim', ch, count: len, orig: len, canOpen, canClose });
         this.pos += len;
         continue;
       }
@@ -702,12 +773,15 @@ class InlineScanner {
       }
 
       if (ch === '\n') {
-        const hard = /^(?: {2,}|\\)\n(?!\s*$)[ \t]*/.exec(rest);
-        if (hard) {
-          buf = buf.replace(/[ \t]+$/, '');
+        // Two or more trailing spaces (or a backslash) hard-break, unless only whitespace follows.
+        const trail = /[ \t]+$/.exec(buf);
+        const hardSpaces = trail !== null && trail[0].length >= 2;
+        if (hardSpaces && /[^ \t\n]/.test(src.slice(this.pos + 1))) {
+          buf = buf.slice(0, buf.length - trail[0].length);
           flush();
           nodes.push({ type: 'br' });
-          this.pos += hard[0].length;
+          this.pos++;
+          while (src[this.pos] === ' ' || src[this.pos] === '\t') this.pos++;
           continue;
         }
         buf += '\n';
@@ -934,7 +1008,7 @@ function hasLink(nodes) {
   return false;
 }
 
-// CommonMark's delimiter-stack emphasis over a flat node list.
+// CommonMark's delimiter-stack emphasis over a flat node list, applied recursively to children.
 function processEmphasis(nodes) {
   let ci = 0;
   while (ci < nodes.length) {
@@ -956,6 +1030,7 @@ function processEmphasis(nodes) {
     opener.count -= use;
     closer.count -= use;
     const inner = nodes.splice(oi + 1, ci - oi - 1);
+    processEmphasis(inner);
     nodes.splice(oi + 1, 0, { type: use === 2 ? 'strong' : 'em', children: inner });
     ci = oi + 2;
     if (opener.count === 0) { nodes.splice(oi, 1); ci--; }
