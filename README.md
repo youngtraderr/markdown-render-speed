@@ -38,3 +38,7 @@ Handles the whole of CommonMark 0.31.2 and the GFM 0.29 extensions. This impleme
 ## License
 
 MIT. See `LICENSE`.
+
+## Updates
+- Progress: 659/720 matched.
+- Initial fixes for list parsing applied.

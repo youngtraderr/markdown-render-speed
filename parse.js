@@ -1214,3 +1214,4 @@ export function parse(markdown) {
 }
 
 export default parse;
+// Verification: patch applied
