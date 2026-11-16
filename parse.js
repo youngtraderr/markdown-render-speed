@@ -297,7 +297,7 @@ class BlockScanner {
       }
 
       // link reference definition
-      if (reDefStart.test(text)) {
+      if (reDefStart.test(text) || /^ {0,3}\[/.test(text)) {
         const def = this.scanDef(i, end);
         if (def) {
           if (!this.links[def.tag]) this.links[def.tag] = { href: def.href, title: def.title };
@@ -382,7 +382,7 @@ class BlockScanner {
     // must be quoted and may contain newlines, and it must be followed by a blank line or EOF.
     const parts = [this.line(i)];
     let used = 1;
-    while (used < 4 && i + used < end) {
+    while (used < 10 && i + used < end && !reBlankLine.test(this.line(i + used))) {
       parts.push(this.line(i + used));
       used++;
     }
