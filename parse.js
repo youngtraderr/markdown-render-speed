@@ -1203,6 +1203,15 @@ function inlineHtml(src, links) {
 
 /* ---------------------------------------------------------------- entry point */
 
+export function _debugTokens(markdown) {
+  const src = String(markdown).replace(/\r\n|\r/g, '\n');
+  const links = Object.create(null);
+  const scanner = new BlockScanner(src, links);
+  const tokens = [];
+  scanner.scan(0, scanner.lines.length, tokens);
+  return tokens;
+}
+
 export function parse(markdown) {
   const src = String(markdown).replace(/\r\n|\r/g, '\n');
   if (src === '') return '';
