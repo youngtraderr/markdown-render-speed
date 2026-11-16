@@ -50,6 +50,7 @@ const unescapePunct = (s) => (s.indexOf('\\') < 0 ? s : s.replace(reAnyPunct, '$
 /* ---------------------------------------------------------------- predicates */
 
 const reBlankLine = /^[ \t]*$/;
+const reBlankLineSub = /^$/;
 const reNonSpace = /[^ ]/;
 const reIsPunct = /[\p{P}\p{S}]/u;
 const reAlphaNum = /[\p{L}\p{N}]/u;
@@ -138,10 +139,11 @@ function splitRow(row, width) {
 /* ---------------------------------------------------------------- block scanning */
 
 class BlockScanner {
-  constructor(src, links) {
+  constructor(src, links, reBlank = reBlankLine) {
     this.src = src;
     this.links = links;
     this.lines = splitLines(src);
+    this.reBlankLine = reBlank;
   }
 
   line(i) { return this.src.slice(this.lines[i][0], this.lines[i][1]); }
@@ -149,7 +151,7 @@ class BlockScanner {
   // Can line `i` interrupt a paragraph?
   interrupts(i) {
     const t = this.line(i);
-    if (reBlankLine.test(t)) return true;
+    if (this.reBlankLine.test(t)) return true;
     if (reHeading.test(t)) return true;
     if (reHr.test(t)) return true;
     if (reFence.test(t)) return true;
@@ -167,7 +169,7 @@ class BlockScanner {
 
   // Does the line's content open a block that can hold lazy continuations?
   opensParagraph(t) {
-    if (reBlankLine.test(t)) return false;
+    if (this.reBlankLine.test(t)) return false;
     if (reHeading.test(t) || reHr.test(t) || reFence.test(t)) return false;
     if (reBlockquote.test(t) || reHtmlBlockStart.test(t) || reIndentCode.test(t)) return false;
     if (reListItem.test(t)) return false;
@@ -180,7 +182,7 @@ class BlockScanner {
     let lastWasParagraph = false;
     while (i < end) {
       const text = this.line(i);
-      if (reBlankLine.test(text)) { i++; pendingBlanks++; lastWasParagraph = false; continue; }
+      if (this.reBlankLine.test(text)) { i++; pendingBlanks++; lastWasParagraph = false; continue; }
       if (pendingBlanks) {
         if (out.length) out.push({ type: 'space', raw: '\n'.repeat(pendingBlanks) });
         pendingBlanks = 0;
@@ -356,22 +358,24 @@ class BlockScanner {
         rawLines.push(t);
         const bodyText = demarkBlockquote(t);
         inParagraph = this.opensParagraph(bodyText);
-      } else if (inParagraph && !reBlankLine.test(t) && !this.interrupts(j)) {
+      } else if (inParagraph && !this.reBlankLine.test(t) && !this.interrupts(j)) {
         rawLines.push(t);
       } else break;
     }
     // Phase 2: strip markers.
-    // If the block is NOT in a paragraph (meaning it contains blocks), we must treat lines as block content.
-    // However, for compatibility, we just demark everything.
     const body = rawLines.map((t) => {
-      if (!reBlockquote.test(t)) return t;
+      if (!reBlockquote.test(t)) {
+        // Strip leading whitespace for lazy lines, but only if they contain non-whitespace
+        const stripped = t.replace(/^[ \t]+/, '');
+        return stripped.length > 0 ? stripped : t;
+      }
       return demarkBlockquote(t);
     });
     // marked rewrites setext underlines when they are inside blockquotes.
     for (let b = 1; b < body.length; b++) {
       if (reSetext.test(body[b])) body[b] = '    ' + body[b].replace(/^ {0,3}/, '');
     }
-    const sub = new BlockScanner(body.join('\n'), this.links);
+    const sub = new BlockScanner(body.join('\n'), this.links, reBlankLineSub);
     const tokens = [];
     sub.scan(0, sub.lines.length, tokens);
     return { token: { type: 'blockquote', tokens }, next: j };
@@ -894,8 +898,18 @@ class InlineScanner {
     const m = reUrlStart.exec(rest);
     if (!m) return null;
     let raw = m[0];
+
+    // Strip trailing punctuation for mailto/xmpp to match marked behavior
     if (/^(?:mailto|xmpp):/i.test(raw)) {
-      if (!reEmailAddr.test(raw)) return null;
+      // Remove trailing punctuation that should not be part of link
+      while (/[./]$/.test(raw)) raw = raw.slice(0, -1);
+      // Disqualify if immediately followed by - or _ (e.g. mailto:a@b-)
+      const after = rest.slice(raw.length);
+      if (/^[-_]/.test(after)) return null;
+
+      // Validate email part (scheme:rest of email)
+      const emailPart = raw.split(":")[1]; // scheme:rest
+      if (!reEmailAddr.test(emailPart.split(/[\/]/)[0])) return null;
     } else if (/^www\./i.test(raw) || /^[a-zA-Z]+:\/\//.test(raw)) {
       if (!/^(?:[hH][tT][tT][pP][sS]?|[fF][tT][pP]):\/\//.test(raw) && !/^www\./i.test(raw)) return null;
       let prevRaw;
@@ -908,11 +922,12 @@ class InlineScanner {
     } else if (!reEmailAddr.test(raw)) {
       return null;
     }
+
     const label = raw;
     let href;
     if (/^(?:mailto|xmpp):/i.test(raw)) href = raw;
-    else if (raw.indexOf('@') >= 0 && !/^[a-zA-Z]+:\/\//.test(raw) && !/^www\./i.test(raw)) href = 'mailto:' + raw;
-    else if (/^www\./i.test(raw)) href = 'http://' + raw;
+    else if (raw.indexOf("@") >= 0 && !/^[a-zA-Z]+:\/\//.test(raw) && !/^www\./i.test(raw)) href = "mailto:" + raw;
+    else if (/^www\./i.test(raw)) href = "http://" + raw;
     else href = raw;
     this.pos += raw.length;
     return { type: 'link', href, title: null, autolink: true, children: [{ type: 'text', text: label }] };

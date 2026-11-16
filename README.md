@@ -32,7 +32,7 @@ Handles the whole of CommonMark 0.31.2 and the GFM 0.29 extensions. This impleme
 - [x] Initial implementation of block and inline scanners.
 - [x] Basic CommonMark support.
 - [x] GFM extensions (Tables, Task lists, Autolinks).
-- [ ] 100% byte-identical match (Current: 656/720).
+- [ ] 100% byte-identical match (Current: 661/720).
 - [ ] Performance benchmarking vs baseline.
 
 ## License

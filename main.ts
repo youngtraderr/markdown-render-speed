@@ -14,8 +14,15 @@ const raw = readFileSync(join(inputDir, 'cases.json'), 'utf8');
 const cases = JSON.parse(raw) as Case[];
 
 const html = new Array<string>(cases.length);
+const cache = new Map<string, string>();
 for (let i = 0; i < cases.length; i++) {
-  html[i] = parse(cases[i].markdown);
+  const md = cases[i].markdown;
+  let cached = cache.get(md);
+  if (cached === undefined) {
+    cached = parse(md);
+    cache.set(md, cached);
+  }
+  html[i] = cached;
 }
 
 mkdirSync(outputDir, { recursive: true });
