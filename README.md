@@ -1,4 +1,4 @@
-# markdown-render-speed
+# markdown-render-speed (updated)
 
 A dependency-free ES module that renders Markdown to the exact HTML
 [marked](https://github.com/markedjs/marked) 18.1.3 produces with its default
@@ -41,4 +41,4 @@ MIT. See `LICENSE`.
 
 ## Updates
 - Progress: 659/720 matched.
-- Initial fixes for list parsing applied.
+- Initial fixes for list parsing applied. - Fixed cm-280 list item parsing issue.

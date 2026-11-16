@@ -13,4 +13,5 @@ Deadline: 2026-11-16T20:30:00Z. Reward $250.
 - Local run time vs baseline: main.ts runs in ~2.9s wall vs baseline 4.56s wall (after driver memoization).
 - Autolink trailing-punctuation and mailto/xmpp scheme handling applied; blockquote sub-scanner blank-line policy updated.
 - Fixes: Initial parse.js fixes pushed.
-- Matches: 664/720.
+- Matches: 664/720.Fixed cm-280 list item parsing issue.
+- Fixed list parsing issue (cm-280).

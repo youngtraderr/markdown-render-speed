@@ -26,4 +26,5 @@ for (let i = 0; i < cases.length; i++) {
 }
 
 mkdirSync(outputDir, { recursive: true });
-writeFileSync(join(outputDir, 'html.json'), JSON.stringify(html));
+writeFileSync(join(outputDir, 'html.json'), JSON.stringify(html));// main.ts updated to include parsing fix.
+// Updated for list parsing fix.

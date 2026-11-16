@@ -520,6 +520,7 @@ class BlockScanner {
           continue;
         }
         if (leadZ >= contentCol || ze.trim() === '') {
+          if (firstLine === '' && lastWasBlank) break;
           if (lastWasBlank) innerBlank = true;
           itemBody.push(ze.slice(contentCol));
           lastWasBlank = false;
