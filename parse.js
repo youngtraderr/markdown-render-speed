@@ -333,11 +333,14 @@ class BlockScanner {
         rawLines.push(t);
       } else break;
     }
-    // Phase 2: strip markers, expanding tabs by the marker column and rewriting setext underlines.
+    // Phase 2: strip markers.
+    // If the block is NOT in a paragraph (meaning it contains blocks), we must treat lines as block content.
+    // However, for compatibility, we just demark everything.
     const body = rawLines.map((t) => {
       if (!reBlockquote.test(t)) return t;
       return demarkBlockquote(t);
     });
+    // marked rewrites setext underlines when they are inside blockquotes.
     for (let b = 1; b < body.length; b++) {
       if (reSetext.test(body[b])) body[b] = '    ' + body[b].replace(/^ {0,3}/, '');
     }
@@ -459,11 +462,12 @@ class BlockScanner {
       const markerLen = m[2].length;
       const indent = m[1].length;
       const after = m[5];
-      // marked expands tabs in the marker's remainder relative to the marker column, then measures
-      // the run of leading whitespace; >4 columns collapse to a 1-column pad.
+      // marked: if after is empty, the item is empty (or a block).
+      // If there is content, calculate padding based on tabs-to-spaces.
       const expanded = expandTabsFrom(after, indent + markerLen);
       const lead = expanded.length - expanded.replace(/^[ \t]+/, '').length;
       let pad = lead > 4 ? 1 : lead;
+      if (after.trim() === '') pad = 1;
       const contentCol = indent + markerLen + pad;
       const firstLine = expanded.slice(Math.min(expanded.length, pad));
 
